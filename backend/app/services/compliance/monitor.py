@@ -78,7 +78,10 @@ class ComplianceMonitor:
                 continue
             try:
                 conductor = await self._upsert_conductor(tenant, c_uni, now)
-                docs_unigis = await documentos_svc.obtener_por_conductor(c_uni.nro_documento)
+                docs_unigis = await documentos_svc.obtener_por_conductor(
+                    c_uni.nro_documento,
+                    id_conductor=c_uni.id_conductor,
+                )
                 doc_stats = await self._upsert_documentos(
                     conductor, docs_unigis, tenant.dias_preaviso_default, now
                 )
@@ -117,6 +120,7 @@ class ComplianceMonitor:
             )
             self.db.add(conductor)
 
+        conductor.id_conductor_unigis = c_uni.id_conductor
         conductor.login = c_uni.login
         conductor.nombre = c_uni.nombre
         conductor.apellido = c_uni.apellido

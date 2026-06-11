@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ConductorUnigis:
     nro_documento: str
+    id_conductor: int | None      # IdConductor UNIGIS — usado como fallback en ObtenerDocumentosEntidad
     login: str | None
     nombre: str | None
     apellido: str | None
@@ -31,8 +32,10 @@ def _parse_conductor(data: Any) -> ConductorUnigis:
         val = getattr(data, attr, None)
         return str(val).strip() if val is not None else None
 
+    _id_raw = getattr(data, "IdConductor", None)
     return ConductorUnigis(
         nro_documento=g("NroDocumento") or "",
+        id_conductor=int(_id_raw) if _id_raw is not None else None,
         login=g("Login"),
         nombre=g("Nombre"),
         apellido=g("Apellido"),

@@ -2,7 +2,7 @@
 Servicio UNIGIS — operaciones de Documentos de Entidad.
 
 Endpoints usados:
-  - ObtenerDocumentosEntidad          → Entidad="Conductor", Referencia=NroDocumento
+  - ObtenerDocumentosEntidad          → estrategia AUTO: Referencia → IdEntidad fallback
   - ConsultarCantidadDocumentosPorEstado → resumen estadístico
   - CrearDocumentos                   → upload de archivo en base64
 """
@@ -62,26 +62,84 @@ class DocumentosService:
     def __init__(self, client: UnigisClient) -> None:
         self.client = client
 
-    async def obtener_por_conductor(self, nro_documento: str) -> list[DocumentoUnigis]:
-        """ObtenerDocumentosEntidad con Entidad=Conductor y Referencia=NroDocumento."""
+    def _parse_items(self, result: Any) -> list[DocumentoUnigis]:
+        """Parsea el resultado zeep de ObtenerDocumentosEntidad."""
+        if result is None:
+            return []
+        items = result if hasattr(result, "__iter__") and not isinstance(result, (str, dict)) else [result]
+        docs = []
+        for item in items:
+            try:
+                docs.append(_parse_documento(item))
+            except Exception as err:
+                logger.debug("Parse documento falló: %s", err)
+        return docs
+
+    async def obtener_por_conductor(
+        self,
+        nro_documento: str,
+        id_conductor: int | None = None,
+    ) -> list[DocumentoUnigis]:
+        """
+        ObtenerDocumentosEntidad con estrategia AUTO.
+
+        1. Intenta con Referencia=nro_documento.
+        2. Si no retorna documentos, intenta con IdEntidad=id_conductor (si disponible).
+        Los logs registran qué estrategia encontró documentos.
+        """
+        # ── Intento 1: Referencia ─────────────────────────────────────────────
         try:
             result = await self.client.call(
                 "ObtenerDocumentosEntidad",
                 Entidad=ENTIDAD_CONDUCTOR,
                 Referencia=nro_documento,
             )
-            if result is None:
-                return []
-            items = result if hasattr(result, "__iter__") and not isinstance(result, (str, dict)) else [result]
-            documentos = []
-            for item in items:
-                try:
-                    documentos.append(_parse_documento(item))
-                except Exception as err:
-                    logger.debug("Parse documento falló: %s", err)
-            return documentos
+            docs = self._parse_items(result)
+            if docs:
+                logger.debug(
+                    "ObtenerDocumentosEntidad(%s): %d doc(s) via Referencia",
+                    nro_documento, len(docs),
+                )
+                return docs
         except Exception as exc:
-            logger.warning("ObtenerDocumentosEntidad(%s) falló: %s", nro_documento, exc)
+            logger.warning(
+                "ObtenerDocumentosEntidad Referencia(%s) falló: %s",
+                nro_documento, exc,
+            )
+
+        # ── Intento 2: IdEntidad (fallback AUTO) ──────────────────────────────
+        if id_conductor is None:
+            logger.warning(
+                "ObtenerDocumentosEntidad(%s): Referencia sin resultados "
+                "e IdConductor no disponible — sin documentos",
+                nro_documento,
+            )
+            return []
+
+        try:
+            result = await self.client.call(
+                "ObtenerDocumentosEntidad",
+                Entidad=ENTIDAD_CONDUCTOR,
+                IdEntidad=id_conductor,
+            )
+            docs = self._parse_items(result)
+            if docs:
+                logger.info(
+                    "ObtenerDocumentosEntidad(%s): %d doc(s) via IdEntidad=%s [fallback AUTO]",
+                    nro_documento, len(docs), id_conductor,
+                )
+            else:
+                logger.warning(
+                    "ObtenerDocumentosEntidad(%s): sin documentos via "
+                    "Referencia ni IdEntidad=%s",
+                    nro_documento, id_conductor,
+                )
+            return docs
+        except Exception as exc:
+            logger.warning(
+                "ObtenerDocumentosEntidad IdEntidad(%s) falló: %s",
+                id_conductor, exc,
+            )
             return []
 
     async def cantidad_por_estado(self) -> dict[str, int]:

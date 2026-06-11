@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey, func, UniqueConstraint
+from sqlalchemy import String, DateTime, ForeignKey, Integer, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -20,6 +20,7 @@ class Conductor(Base):
 
     # Campos sincronizados desde UNIGIS
     nro_documento: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    id_conductor_unigis: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     login: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)
     apellido: Mapped[str | None] = mapped_column(String(200), nullable=True)
