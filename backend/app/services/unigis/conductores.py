@@ -36,7 +36,7 @@ def _parse_conductor(data: Any) -> ConductorUnigis:
         login=g("Login"),
         nombre=g("Nombre"),
         apellido=g("Apellido"),
-        email=g("Email"),
+        email=g("EMail") or g("Email"),
         telefono=g("Telefono") or g("Celular"),
         raw={},
     )

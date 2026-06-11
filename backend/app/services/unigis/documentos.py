@@ -51,7 +51,7 @@ def _parse_documento(data: Any) -> DocumentoUnigis:
         documento_id=int(g("IdDocumento") or 0) or None,
         tipo_documento_id=int(g("IdTipoDocumento") or 0),
         tipo_documento_nombre=str(g("TipoDocumento") or g("Descripcion") or ""),
-        fecha_vencimiento=_parse_fecha(g("FechaVencimiento")),
+        fecha_vencimiento=_parse_fecha(g("FechaExpiracion") or g("FechaVencimiento")),
         dias_preaviso=int(g("DiasPreavisoVencimiento") or 15),
         notificar_mobile=bool(g("NotificarMobile")),
         raw={},
