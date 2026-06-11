@@ -39,9 +39,12 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     section = config.get_section(config.config_ini_section, {})
-    section["sqlalchemy.url"] = section["sqlalchemy.url"].replace(
-        "postgresql://", "postgresql+asyncpg://"
-    )
+    import os
+    db_url = os.environ.get("DATABASE_URL", section.get("sqlalchemy.url", ""))
+    # Normalizar a asyncpg
+    if db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
+        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    section["sqlalchemy.url"] = db_url
     connectable = async_engine_from_config(
         section,
         prefix="sqlalchemy.",

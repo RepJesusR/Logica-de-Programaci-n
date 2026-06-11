@@ -13,7 +13,14 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api/v1"
 
     DATABASE_URL: str = "postgresql+asyncpg://zuvra:zuvra@localhost:5432/zuvra"
-    DATABASE_URL_SYNC: str = "postgresql://zuvra:zuvra@localhost:5432/zuvra"
+
+    @property
+    def async_database_url(self) -> str:
+        """Normaliza la URL para asyncpg (Render provee postgresql://)."""
+        url = self.DATABASE_URL
+        if url.startswith("postgresql://") and "+asyncpg" not in url:
+            return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
 
     UNIGIS_WSDL_URL: str = ""
     UNIGIS_API_KEY: str = ""
@@ -33,6 +40,10 @@ class Settings(BaseSettings):
     NOTIFY_JOB_MINUTE: int = 0
 
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+
+    # API Key para autenticar el panel admin y llamadas internas
+    # Generar con: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    ZUVRA_API_KEY: str = ""
 
     @property
     def cors_origins_list(self) -> List[str]:

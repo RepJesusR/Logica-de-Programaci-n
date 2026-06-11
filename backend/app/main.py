@@ -35,6 +35,18 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 @app.on_event("startup")
 async def startup():
     logger.info("Zuvra API arrancando", env=settings.APP_ENV)
+
+    # Validar configuración crítica y advertir (no abortar — permite arrancar sin notificaciones)
+    warnings = []
+    if not settings.ZUVRA_API_KEY:
+        warnings.append("ZUVRA_API_KEY no configurada — todos los endpoints quedarán bloqueados")
+    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        warnings.append("Twilio no configurado — WhatsApp deshabilitado")
+    if not settings.SENDGRID_API_KEY:
+        warnings.append("SendGrid no configurado — Email deshabilitado")
+    for w in warnings:
+        logger.warning("CONFIG: %s", w)
+
     scheduler = create_scheduler()
     scheduler.start()
     logger.info(
@@ -54,4 +66,20 @@ async def shutdown():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "zuvra-compliance"}
+    """Health check real: valida conectividad con la base de datos."""
+    from sqlalchemy import text
+    from app.database import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception as exc:
+        logger.warning("Health check: DB no disponible: %s", exc)
+        db_ok = False
+
+    status_code = 200 if db_ok else 503
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "ok" if db_ok else "degraded", "db": db_ok, "service": "zuvra-compliance"},
+    )

@@ -2,9 +2,9 @@
 Servicio UNIGIS — operaciones de Documentos de Entidad.
 
 Endpoints usados:
-  - ObtenerDocumentosEntidad   → Entidad="Conductor", Referencia=NroDocumento
+  - ObtenerDocumentosEntidad          → Entidad="Conductor", Referencia=NroDocumento
   - ConsultarCantidadDocumentosPorEstado → resumen estadístico
-  - CrearDocumentos            → upload de archivo en base64
+  - CrearDocumentos                   → upload de archivo en base64
 """
 import base64
 import logging
@@ -37,7 +37,6 @@ def _parse_fecha(valor: Any) -> date | None:
         return valor
     try:
         from datetime import datetime
-        # UNIGIS puede devolver "YYYY-MM-DDTHH:MM:SS" o "YYYY-MM-DD"
         s = str(valor).split("T")[0]
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
@@ -63,19 +62,17 @@ class DocumentosService:
     def __init__(self, client: UnigisClient) -> None:
         self.client = client
 
-    def obtener_por_conductor(self, nro_documento: str) -> list[DocumentoUnigis]:
-        """
-        ObtenerDocumentosEntidad con Entidad=Conductor y Referencia=NroDocumento.
-        """
+    async def obtener_por_conductor(self, nro_documento: str) -> list[DocumentoUnigis]:
+        """ObtenerDocumentosEntidad con Entidad=Conductor y Referencia=NroDocumento."""
         try:
-            result = self.client.call(
+            result = await self.client.call(
                 "ObtenerDocumentosEntidad",
                 Entidad=ENTIDAD_CONDUCTOR,
                 Referencia=nro_documento,
             )
             if result is None:
                 return []
-            items = result if hasattr(result, "__iter__") else [result]
+            items = result if hasattr(result, "__iter__") and not isinstance(result, (str, dict)) else [result]
             documentos = []
             for item in items:
                 try:
@@ -84,21 +81,15 @@ class DocumentosService:
                     logger.debug("Parse documento falló: %s", err)
             return documentos
         except Exception as exc:
-            logger.warning(
-                "ObtenerDocumentosEntidad(%s) falló: %s", nro_documento, exc
-            )
+            logger.warning("ObtenerDocumentosEntidad(%s) falló: %s", nro_documento, exc)
             return []
 
-    def cantidad_por_estado(self) -> dict[str, int]:
-        """
-        ConsultarCantidadDocumentosPorEstado — resumen para el dashboard.
-        Retorna dict con claves: VIGENTE, POR_VENCER, VENCIDO.
-        """
+    async def cantidad_por_estado(self) -> dict[str, int]:
+        """ConsultarCantidadDocumentosPorEstado — resumen para el dashboard."""
         try:
-            result = self.client.call("ConsultarCantidadDocumentosPorEstado")
+            result = await self.client.call("ConsultarCantidadDocumentosPorEstado")
             if result is None:
                 return {}
-            # Intentamos parsear los campos más comunes
             return {
                 "VIGENTE": int(getattr(result, "Vigentes", 0) or 0),
                 "POR_VENCER": int(getattr(result, "PorVencer", 0) or 0),
@@ -108,7 +99,7 @@ class DocumentosService:
             logger.warning("ConsultarCantidadDocumentosPorEstado falló: %s", exc)
             return {}
 
-    def crear_documento(
+    async def crear_documento(
         self,
         nro_documento_conductor: str,
         tipo_documento_id: int,
@@ -116,13 +107,10 @@ class DocumentosService:
         archivo_bytes: bytes,
         nombre_archivo: str,
     ) -> bool:
-        """
-        CrearDocumentos — sube un archivo en base64 para un conductor.
-        Retorna True si fue exitoso.
-        """
+        """CrearDocumentos — sube un archivo en base64 para un conductor."""
         try:
             archivo_b64 = base64.b64encode(archivo_bytes).decode()
-            result = self.client.call(
+            result = await self.client.call(
                 "CrearDocumentos",
                 Entidad=ENTIDAD_CONDUCTOR,
                 Referencia=nro_documento_conductor,

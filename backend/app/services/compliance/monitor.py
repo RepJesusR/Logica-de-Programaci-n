@@ -7,20 +7,19 @@ Flujo por tenant:
   3. Para cada conductor, obtener documentos desde UNIGIS
   4. Calcular estado (VIGENTE / POR_VENCER / VENCIDO / SIN_DOCUMENTO)
   5. Upsert documentos en DB local
-  6. Disparar notificaciones para POR_VENCER y VENCIDO (con deduplicación diaria)
 """
 import logging
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.conductor import Conductor
 from app.models.documento import Documento, EstadoDocumento
 from app.models.tenant import Tenant
-from app.services.unigis import ConductoresService, DocumentosService, UnigisClient
-from app.services.unigis.documentos import DocumentoUnigis
+from app.services.unigis.client import UnigisClient
+from app.services.unigis.conductores import ConductoresService, ConductorUnigis
+from app.services.unigis.documentos import DocumentosService, DocumentoUnigis
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +51,7 @@ class ComplianceMonitor:
         self.db = db
 
     async def sync_tenant(self, tenant: Tenant) -> dict:
-        """
-        Ejecuta el ciclo completo de sync para un tenant.
-        Retorna estadísticas del ciclo.
-        """
+        """Ejecuta el ciclo completo de sync para un tenant. Retorna estadísticas."""
         stats = {
             "tenant_id": str(tenant.id),
             "tenant_slug": tenant.slug,
@@ -70,7 +66,7 @@ class ComplianceMonitor:
         conductores_svc = ConductoresService(client)
         documentos_svc = DocumentosService(client)
 
-        conductores_unigis = conductores_svc.listar_todos()
+        conductores_unigis = await conductores_svc.listar_todos()
         if not conductores_unigis:
             logger.warning("Tenant %s: sin conductores en UNIGIS", tenant.slug)
             return stats
@@ -82,7 +78,7 @@ class ComplianceMonitor:
                 continue
             try:
                 conductor = await self._upsert_conductor(tenant, c_uni, now)
-                docs_unigis = documentos_svc.obtener_por_conductor(c_uni.nro_documento)
+                docs_unigis = await documentos_svc.obtener_por_conductor(c_uni.nro_documento)
                 doc_stats = await self._upsert_documentos(
                     conductor, docs_unigis, tenant.dias_preaviso_default, now
                 )
@@ -104,12 +100,9 @@ class ComplianceMonitor:
     async def _upsert_conductor(
         self,
         tenant: Tenant,
-        c_uni: "ConductoresService",
+        c_uni: ConductorUnigis,
         now: datetime,
     ) -> Conductor:
-        from app.services.unigis.conductores import ConductorUnigis
-        c_uni: ConductorUnigis
-
         stmt = select(Conductor).where(
             Conductor.tenant_id == tenant.id,
             Conductor.nro_documento == c_uni.nro_documento,
@@ -142,7 +135,18 @@ class ComplianceMonitor:
     ) -> dict:
         stats = {"upserted": 0, "por_vencer": 0, "vencidos": 0}
 
+        # Deduplicar por tipo_documento_id para evitar viola única constraint
+        seen_tipos: set[int] = set()
+
         for doc_uni in docs_unigis:
+            if doc_uni.tipo_documento_id in seen_tipos:
+                logger.warning(
+                    "Conductor %s: tipo_documento_id %s duplicado en respuesta UNIGIS, ignorando",
+                    conductor.nro_documento, doc_uni.tipo_documento_id,
+                )
+                continue
+            seen_tipos.add(doc_uni.tipo_documento_id)
+
             dias_preaviso = doc_uni.dias_preaviso or dias_preaviso_default
             estado, dias_para_vencer = _calcular_estado(
                 doc_uni.fecha_vencimiento, dias_preaviso
@@ -182,15 +186,6 @@ class ComplianceMonitor:
 
     async def get_resumen_flota(self, tenant_id) -> dict:
         """Resumen de estado documental de toda la flota para el dashboard."""
-        from sqlalchemy import func, and_
-
-        total_q = await self.db.execute(
-            select(func.count()).where(
-                Documento.conductor_id.in_(
-                    select(Conductor.id).where(Conductor.tenant_id == tenant_id)
-                )
-            )
-        )
         totals_q = await self.db.execute(
             select(Documento.estado, func.count())
             .join(Conductor)
@@ -199,8 +194,9 @@ class ComplianceMonitor:
         )
 
         conteos = {row[0]: row[1] for row in totals_q.fetchall()}
+        total = sum(conteos.values())
         return {
-            "total": total_q.scalar() or 0,
+            "total": total,
             "vigente": conteos.get(EstadoDocumento.VIGENTE, 0),
             "por_vencer": conteos.get(EstadoDocumento.POR_VENCER, 0),
             "vencido": conteos.get(EstadoDocumento.VENCIDO, 0),

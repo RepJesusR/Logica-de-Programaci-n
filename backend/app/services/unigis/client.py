@@ -3,14 +3,18 @@ UNIGIS MAPI SOAP Client base.
 
 Gestiona la conexión zeep, autenticación y retry automático.
 Cada instancia corresponde a un Tenant con sus propias credenciales.
+
+IMPORTANTE: zeep usa `requests` (síncrono). Todas las llamadas SOAP se ejecutan
+en un ThreadPoolExecutor para no bloquear el event loop de asyncio.
 """
+import asyncio
 import logging
 from functools import cached_property
 from typing import Any
 
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from zeep import Client, Settings as ZeepSettings
-from zeep.cache import SqliteCache
+from zeep.cache import InMemoryCache
 from zeep.transports import Transport
 
 logger = logging.getLogger(__name__)
@@ -40,8 +44,9 @@ class UnigisClient:
 
     @cached_property
     def _zeep(self) -> Client:
+        # InMemoryCache es thread-safe (a diferencia de SqliteCache).
         transport = Transport(
-            cache=SqliteCache(timeout=3600),
+            cache=InMemoryCache(timeout=3600),
             timeout=30,
             operation_timeout=60,
         )
@@ -49,8 +54,8 @@ class UnigisClient:
         client = Client(self.wsdl_url, transport=transport, settings=settings)
         return client
 
-    def _auth_header(self) -> dict[str, str]:
-        """Header de autenticación que UNIGIS MAPI espera en cada llamada."""
+    def _auth_params(self) -> dict[str, str]:
+        """Parámetros de autenticación UNIGIS MAPI (se pasan en el body de cada operación)."""
         return {
             "ApiKey": self.api_key,
             "Login": self.login,
@@ -58,18 +63,25 @@ class UnigisClient:
         }
 
     @retry(**_RETRY_KWARGS)
-    def call(self, operation: str, **kwargs: Any) -> Any:
-        """
-        Ejecuta una operación SOAP contra UNIGIS.
-
-        Ejemplo:
-            client.call("ConsultarConductor", NroDocumento="20123456")
-        """
+    def _call_sync(self, operation: str, **kwargs: Any) -> Any:
+        """Ejecuta la llamada SOAP de forma síncrona (interno, correr en thread)."""
         service = self._zeep.service
         method = getattr(service, operation)
-        result = method(**self._auth_header(), **kwargs)
-        logger.debug("UNIGIS %s → %s", operation, result)
+        result = method(**self._auth_params(), **kwargs)
+        logger.debug("UNIGIS %s → OK", operation)
         return result
+
+    async def call(self, operation: str, **kwargs: Any) -> Any:
+        """
+        Ejecuta una operación SOAP en un threadpool para no bloquear asyncio.
+
+        Ejemplo:
+            await client.call("ConsultarConductor", NroDocumento="20123456")
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self._call_sync(operation, **kwargs)
+        )
 
     @classmethod
     def from_tenant(cls, tenant: Any) -> "UnigisClient":

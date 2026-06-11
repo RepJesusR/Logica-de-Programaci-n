@@ -1,0 +1,62 @@
+services:
+  # ── API Backend ────────────────────────────────────────────────────
+  - type: web
+    name: zuvra-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: zuvra-db
+          property: connectionString
+        # Render provee postgresql://, convertir a +asyncpg en config.py
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ZUVRA_API_KEY
+        generateValue: true
+      - key: UNIGIS_WSDL_URL
+        sync: false
+      - key: UNIGIS_API_KEY
+        sync: false
+      - key: UNIGIS_LOGIN
+        sync: false
+      - key: UNIGIS_PASSWORD
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+    healthCheckPath: /health
+
+  # ── Frontend ───────────────────────────────────────────────────────
+  - type: web
+    name: zuvra-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: VITE_TENANT_SLUG
+        sync: false
+      - key: VITE_API_KEY
+        sync: false
+
+databases:
+  - name: zuvra-db
+    databaseName: zuvra
+    user: zuvra
+    plan: starter
