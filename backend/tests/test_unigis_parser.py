@@ -27,7 +27,8 @@ def test_parse_documento_completo():
     mock.IdDocumento = 42
     mock.IdTipoDocumento = 7
     mock.TipoDocumento = "Licencia de conducir"
-    mock.FechaVencimiento = "2026-01-31"
+    mock.FechaExpiracion = "2026-01-31"   # campo real confirmado en respuestas SOAP
+    mock.FechaVencimiento = None           # no presente en este cliente
     mock.DiasPreavisoVencimiento = 30
     mock.NotificarMobile = True
 
@@ -40,11 +41,27 @@ def test_parse_documento_completo():
     assert doc.notificar_mobile is True
 
 
+def test_parse_documento_fallback_fecha_vencimiento():
+    """Verifica que el fallback a FechaVencimiento funciona si FechaExpiracion no viene."""
+    mock = MagicMock()
+    mock.IdDocumento = 99
+    mock.IdTipoDocumento = 5
+    mock.TipoDocumento = "Seguro"
+    mock.FechaExpiracion = None            # ausente
+    mock.FechaVencimiento = "2025-12-31"  # fallback
+    mock.DiasPreavisoVencimiento = 20
+    mock.NotificarMobile = False
+
+    doc = _parse_documento(mock)
+    assert doc.fecha_vencimiento == date(2025, 12, 31)
+
+
 def test_parse_documento_sin_fecha():
     mock = MagicMock()
     mock.IdDocumento = None
     mock.IdTipoDocumento = 3
     mock.TipoDocumento = "Seguro"
+    mock.FechaExpiracion = None   # explícito para evitar MagicMock truthy
     mock.FechaVencimiento = None
     mock.DiasPreavisoVencimiento = None
     mock.NotificarMobile = False
